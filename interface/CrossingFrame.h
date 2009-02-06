@@ -13,19 +13,9 @@
  *
  ************************************************************/
 
-#include "SimDataFormats/Track/interface/SimTrackContainer.h"
-//#include "SimDataFormats/Track/interface/SimTrack.h"
-#include "SimDataFormats/TrackingHit/interface/PSimHitContainer.h"
-#include "SimDataFormats/CaloHit/interface/PCaloHitContainer.h"
-#include "SimDataFormats/Vertex/interface/SimVertexContainer.h"
-#include "SimDataFormats/GeneratorProducts/interface/HepMCProduct.h"
-
 #include "DataFormats/Provenance/interface/EventID.h"
-#include "DataFormats/Common/interface/Wrapper.h"
-#include "SimDataFormats/EncodedEventId/interface/EncodedEventId.h"
 #include "FWCore/MessageLogger/interface/MessageLogger.h"
 
-#include "boost/shared_ptr.hpp"
 #include <vector>
 #include <string>
 #include <iostream>
@@ -39,8 +29,7 @@ class CrossingFrame
  public:
   // con- and destructors
 
-  CrossingFrame():  firstCrossing_(0), lastCrossing_(0), bunchSpace_(75),subdet_(""),maxNbSources_(0) {
-}
+  CrossingFrame():  firstCrossing_(0), lastCrossing_(0), bunchSpace_(75),subdet_(""),maxNbSources_(0) {;}
   CrossingFrame(int minb, int maxb, int bunchsp, std::string subdet ,unsigned int maxNbSources);
 
   ~CrossingFrame() {;}
@@ -49,29 +38,14 @@ class CrossingFrame
 
   CrossingFrame& operator=(CrossingFrame const& rhs);
 
-  //standard version
   void addSignals(const std::vector<T> * vec,edm::EventID id);
-  // version for HepMCProduct
-  void addSignals(const T * vec,edm::EventID id);
- 
-  // standard version
-  void addPileups(const int bcr, std::vector<T> * vec, unsigned int evtId,int vertexoffset=0,bool checkTof=false,bool high=false);
-  // version for HepMCProduct
-  void addPileups(const int bcr, T * product, unsigned int evtId,int vertexoffset=0,bool checkTof=false,bool high=false);
 
-  void setTof( );
-
-  // we keep the shared pointer in the object that will be only destroyed at the end of the event (transient object!)
-  // because of HepMCProduct, we need 2 versions...
-  void setPileupPtr(boost::shared_ptr<edm::Wrapper<std::vector<T> > const> shPtr) {shPtrPileups_=shPtr;}
-  void setPileupPtr(boost::shared_ptr<edm::Wrapper<T> const> shPtr) {shPtrPileups2_=shPtr;}
-
+  void addPileups(const int bcr,const std::vector<T> * vec, unsigned int evtId,int vertexoffset=0,bool checkTof=false,bool high=false);
+  
   void print(int level=0) const ;
-
   void setBcrOffset() {
     pileupOffsetsBcr_.push_back(pileups_.size());
   }
-
   void setSourceOffset(const unsigned int s) {
     pileupOffsetsSource_[s].push_back(pileups_.size());
   }
@@ -80,33 +54,27 @@ class CrossingFrame
   edm::EventID getEventID() const {return id_;}
   std::pair<int,int> getBunchRange() const {return std::pair<int,int>(firstCrossing_,lastCrossing_);}
   int getBunchSpace() const {return bunchSpace_;}
-
-
-  void getSignal(typename std::vector<const T *>::const_iterator &first,typename std::vector<const T*>::const_iterator &last) const {
+  int getBunchCrossing(unsigned int ip) const;
+  int getSourceType(unsigned int ip) const;
+  void getSignal(typename std::vector<T>::const_iterator &first,typename std::vector<T>::const_iterator &last) const {
     first=signals_.begin();
     last=signals_.end();
   }
-  void getPileups(typename std::vector<const T*>::const_iterator &first, typename std::vector<const T*>::const_iterator &last) const;
+  void getPileups(typename std::vector<T>::const_iterator &first, typename std::vector<T>::const_iterator &last) const;
   unsigned int getNrSignals() const {return signals_.size();} 
   unsigned int getNrPileups() const {return pileups_.size();} 
   unsigned int getNrPileups(int bcr) const {
     return bcr==lastCrossing_ ? pileups_.size()-pileupOffsetsBcr_[lastCrossing_-firstCrossing_] :pileupOffsetsBcr_[bcr-firstCrossing_+1]- pileupOffsetsBcr_[bcr-firstCrossing_];} 
 
-  // get pileup information in dependency from internal pointer
-  int getBunchCrossing(unsigned int ip) const;
-
-  int getSourceType(unsigned int ip) const;
-
   // get object in pileup when position in the vector is known (for DigiSimLink typically)
 
   const T & getObject(unsigned int ip) const { 
-    //ip is position in the MixCollection (i.e. signal + pileup)
-    if (ip<0 || ip>getNrSignals()+getNrPileups()) throw cms::Exception("BadIndex")<<"CrossingFrame::getObject called with an invalid index- index was "<<ip<<"!";
+    if (ip<0 || ip>getNrSignals()+getNrPileups()) throw cms::Exception("BadIndex")<<"CrossingFrame::getObject called with an invalid index!";
     if (ip<getNrSignals()) {
-      return *(signals_[ip]);
+      return signals_[ip];
     }
     else  {
-      return *(pileups_[ip-getNrSignals()]);
+      return pileups_[ip-getNrSignals()];
     }
   }  
 
@@ -133,15 +101,10 @@ class CrossingFrame
   unsigned int maxNbSources_;
 
   // signal
-  std::vector<const T * >  signals_; 
+  std::vector<T>  signals_; 
 
   //pileup
-  std::vector<const T *>  pileups_; 
-  boost::shared_ptr<edm::Wrapper<std::vector<T> > const> shPtrPileups_; 
-  boost::shared_ptr<edm::Wrapper<T> const> shPtrPileups2_;   // fore HepMCProduct
-
-  // these are informations stored in order to be able to have information
-  // as a function of the position of an object in the pileups_ vector
+  std::vector<T>  pileups_;  
   std::vector<unsigned int> pileupOffsetsBcr_;
   std::vector< std::vector<unsigned int> > pileupOffsetsSource_; //one per source
 };
@@ -175,6 +138,12 @@ CrossingFrame<T>::swap(CrossingFrame<T>& other) {
   signals_.swap(other.signals_);
   pileups_.swap(other.pileups_);
   pileupOffsetsBcr_.swap(other.pileupOffsetsBcr_);
+  /*   for (std::vector<unsigned int> *p = pileupOffsetsSource_, */
+  /* 				 *po = other.pileupOffsetsSource_; */
+  /* 				 p < pileupOffsetsSource_ + maxNbSources_; */
+  /* 				 ++p, ++po) { */
+  /*     p->swap(*po); */
+  /*   } */
   pileupOffsetsSource_.resize(maxNbSources_);
   for (unsigned int i=0;i<pileupOffsetsSource_.size();++i) { 
     pileupOffsetsSource_[i].swap(other.pileupOffsetsSource_[i]);
@@ -190,9 +159,14 @@ CrossingFrame<T>::operator=(CrossingFrame<T> const& rhs) {
   return *this;
 }
 
+template <class T> 
+void CrossingFrame<T>::addSignals(const std::vector<T> * vec,edm::EventID id){
+  id_=id;
+  signals_=*vec;
+}
 
 template <class T>  
-void  CrossingFrame<T>::getPileups(typename std::vector<const T *>::const_iterator &first,typename std::vector<const T *>::const_iterator &last) const {
+void  CrossingFrame<T>::getPileups(typename std::vector<T>::const_iterator &first,typename std::vector<T>::const_iterator &last) const {
   first=pileups_.begin();
   last=pileups_.end();
 }
@@ -203,7 +177,6 @@ void CrossingFrame<T>::print(int level) const {
 
 template <class T> 
 int  CrossingFrame<T>::getSourceType(unsigned int ip) const {
-  // ip is position in the pileup vector
   // decide to which source belongs object with index ip in the pileup vector
   // pileup=0, cosmics=1, beam halo+ =2, beam halo- =3 forward =4
   unsigned int bcr= getBunchCrossing(ip)-firstCrossing_; //starts at 0
@@ -222,6 +195,7 @@ int CrossingFrame<T>::getBunchCrossing(unsigned int ip) const {
     if (ip<pileups_.size()) return lastCrossing_;
     else return 999;
 }
+
 
 // Free swap function
 template <typename T>
@@ -243,53 +217,5 @@ std::ostream &operator<<(std::ostream& o, const CrossingFrame<T>& cf)
 
   return o;
 }
-
-//==================== template specializations  ===========================================
-template <class T>
-void CrossingFrame<T>::addPileups(const int bcr, T * product, unsigned int evtId,int vertexoffset,bool checkTof,bool high) {
-  // default, valid for HepMCProduct
-  pileups_.push_back(product);
-}
-
-template <class T>
-void CrossingFrame<T>::addPileups(const int bcr, std::vector<T> * product, unsigned int evtId,int vertexoffset,bool checkTof,bool high){
-  // default, in fact never called since special implementations exist for all possible types
-  // of this signature, i.e. PSimHit, PCaloHit, SimTrack, SimVertex
-  // But needs to be present for HepMCProduct
-}
-
-template <>
-void CrossingFrame<SimTrack>::addPileups(const int bcr, std::vector<SimTrack> *, unsigned int evtId,int vertexoffset,bool checkTof,bool high);
-
-template <>
-void CrossingFrame<SimVertex>::addPileups(const int bcr, std::vector<SimVertex> *, unsigned int evtId,int vertexoffset,bool checkTof,bool high);
-
-template <>
-void CrossingFrame<PSimHit>::addPileups(const int bcr, std::vector<PSimHit> *, unsigned int evtId,int vertexoffset,bool checkTof,bool high);
-
-template <>
-void CrossingFrame<PCaloHit>::addPileups(const int bcr, std::vector<PCaloHit> *, unsigned int evtId,int vertexoffset,bool checkTof,bool high);
-
-template <class T> 
-void CrossingFrame<T>::addSignals(const std::vector<T> * vec,edm::EventID id){
-  // valid (called) for all except HepMCProduct
-  id_=id;
-  for (unsigned int i=0;i<vec->size();++i) {
-    signals_.push_back(&((*vec)[i]));
-  }
-}
-
-template <class T> 
-void CrossingFrame<T>::addSignals(const T * product,edm::EventID id){
-  // valid (called) for all except HepMCProduct
-  id_=id;
-  signals_.push_back(product);
-}
-
-template <class T>
-void CrossingFrame<T>::setTof() {;}
-
-template <>
-void CrossingFrame<PSimHit>::setTof();
 
 #endif 
